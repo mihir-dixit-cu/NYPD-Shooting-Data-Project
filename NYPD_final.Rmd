@@ -1,0 +1,311 @@
+
+---
+title: "Shooting Incidents in the Boroughs of New York City"
+author: "Mihir Dixit"
+date: "2023-03-06"
+output: html_document
+---
+
+## Introduction
+
+The Boroughs of New York City --Brooklyn, Queens, The Bronx, Manhattan, and Staten Island-- Are often considered their own respective environments within the greater city. With this in mind, my analysis of NYPD Shooting Incident data from the period 2006 to 2021 aims to understand how each borough's number of shooting incidents have changed over time.
+
+## Ingestion and Tidying
+
+I then bring in the tidyverse and lubridate libraries, followed by ingestion of the csv file from the url provided
+```{r}
+library(tidyverse)
+library(lubridate)
+
+url <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+
+historic_shootings <- read_csv(url)
+```
+
+I then trim down to the data I will need for analysis. This includes the incident key, the date, the borough, and the murder flag. I then group the data by date and borough, and finally tally the number of 
+```{r}
+by_boro <- historic_shootings %>%
+  mutate(INCIDENT_KEY = as.character(INCIDENT_KEY),
+  OCCUR_DATE = mdy(OCCUR_DATE),
+  BORO = factor(BORO),
+  STATISTICAL_MURDER_FLAG = factor(STATISTICAL_MURDER_FLAG),)%>%
+  select(c(INCIDENT_KEY,BORO,OCCUR_DATE,STATISTICAL_MURDER_FLAG))
+```
+Next I create three more tables which are the boroughs grouped by daily, monthly, and yearly incidents
+```{r}
+by_boro_daily <- by_boro%>%
+  group_by(BORO, OCCUR_DATE)%>% 
+  tally(name = "INCIDENT_COUNT")
+
+by_boro_monthly <- by_boro_daily%>%
+  group_by(BORO, month = floor_date(OCCUR_DATE, 'month'))%>%
+  tally(name = "INCIDENT_COUNT")
+
+by_boro_yearly <- by_boro_daily %>%
+  group_by(BORO, year = floor_date(OCCUR_DATE, 'year'))%>%
+  tally(name = "INCIDENT_COUNT")
+
+```
+ I then take a look at the total number of shooting incidents within each of the Boro's. This bar chart shows us an overall picture of where the most incidents have occured throughout the city
+```{r}
+daily_total_shootings<-historic_shootings%>%
+  count(OCCUR_DATE, name = "Total Daily Shootings", sort = "TRUE")
+
+ggplot(by_boro_daily, aes(x = BORO, y = INCIDENT_COUNT, fill = BORO)) + geom_bar(stat="identity") +
+  scale_fill_discrete(c("Bronx", "Brooklyn", "Manhattan", "Queens", "Staten Island"))
+```
+
+
+While this bar chart proivdes us with a total number of incidents through 2021, I would like to know how each of the boroughs approached these numbers over time. 
+
+
+##Daily Shootings as a function of Time
+I then proceed to create a linear models of Incident count as a function of time for daily data. I create one for the full set of city data and one for each borough.
+
+```{r}
+mod_total <- lm(INCIDENT_COUNT ~ OCCUR_DATE, data = by_boro_daily)
+summary(mod_total)
+
+incidents_lm<-by_boro_daily %>%
+  ungroup()%>%
+  mutate(pred = predict(mod_total))
+
+mod_bk <- lm(INCIDENT_COUNT ~ OCCUR_DATE, data = by_boro_daily%>%filter(BORO == "BROOKLYN"))
+summary(mod_bk)
+
+incidents_lm_bk<-by_boro_daily %>%
+  filter(BORO == "BROOKLYN") %>%
+  mutate(pred = predict(mod_bk))
+
+mod_queens <- lm(INCIDENT_COUNT ~ OCCUR_DATE, data = by_boro_daily%>%filter(BORO == "QUEENS"))
+summary(mod_queens)
+
+incidents_lm_queens<-by_boro_daily %>%
+  filter(BORO == "QUEENS") %>%
+  mutate(pred = predict(mod_queens))
+
+mod_bronx <- lm(INCIDENT_COUNT ~ OCCUR_DATE, data = by_boro_daily%>%filter(BORO == "BRONX"))
+summary(mod_bronx)
+
+incidents_lm_bronx<-by_boro_daily %>%
+  filter(BORO == "BRONX") %>%
+  mutate(pred = predict(mod_bronx))
+
+mod_mnht <- lm(INCIDENT_COUNT ~ OCCUR_DATE, data = by_boro_daily%>%filter(BORO == "MANHATTAN"))
+summary(mod_mnht)
+
+incidents_lm_mnht<-by_boro_daily %>%
+  filter(BORO == "MANHATTAN") %>%
+  mutate(pred = predict(mod_mnht))
+
+mod_si <- lm(INCIDENT_COUNT ~ OCCUR_DATE, data = by_boro_daily%>%filter(BORO == "STATEN ISLAND"))
+summary(mod_si)
+
+mod_bonus <-lm(INCIDENT_COUNT ~ OCCUR_DATE, data = by_boro_daily)
+summary(mod_bonus)
+
+incidents_lm_si<-by_boro_daily %>%
+  filter(BORO == "STATEN ISLAND") %>%
+  mutate(pred = predict(mod_si))
+
+
+incidents_lm_total <- incidents_lm_bk %>%
+  rbind(incidents_lm_bronx)%>%
+  rbind(incidents_lm_queens)%>%
+  rbind(incidents_lm_mnht)%>%
+  rbind(incidents_lm_si)
+
+incidents_lm <- incidents_lm %>%
+  left_join(incidents_lm_total, by = c("BORO", "OCCUR_DATE"))%>%
+  mutate(bonus = predict(mod_bonus))
+```
+We can use the outputs of each model summary to provide us clues about the shootings in the city and each bourough from day to day. Specifically, we are looking at the p-value of each model to determine if the passage of time is a statistically significant predictor of the number of shooting incidents in each borough. Additionally, we can look at the model summary for the entire set to gain insight into the predictions for any given borough in the city. 
+
+
+```{r}
+ggplot(incidents_lm, aes(x = OCCUR_DATE, y = INCIDENT_COUNT.x)) + geom_point(aes(color = BORO))+scale_x_date(date_labels = "%Y", date_breaks = "2 years")+geom_line(aes(color = BORO, x = OCCUR_DATE, y = pred.y), size = 1) + geom_line(aes(color = "Any Given Borough", y = bonus), size = 1)
+
+ggplot(incidents_lm, aes(x = OCCUR_DATE, y = INCIDENT_COUNT.x)) + geom_point(aes(color = BORO))+scale_x_date(date_labels = "%Y", date_breaks = "2 years")+geom_line(aes(color = BORO, x = OCCUR_DATE, y = pred.y), size = 1)+ geom_line(aes(color = "Any Given Borough", x = OCCUR_DATE,  y = bonus)) + scale_y_log10()
+
+ggplot(incidents_lm, aes(x = OCCUR_DATE, y = INCIDENT_COUNT.x)) + geom_line(aes(color = BORO, x = OCCUR_DATE, y = pred.y), size = 1)+ geom_line(aes(color = "Any Given Borough", x = OCCUR_DATE,  y = bonus)) 
+
+ggplot(incidents_lm, aes(x = OCCUR_DATE, y = INCIDENT_COUNT.x)) + geom_line(aes(color = BORO, x = OCCUR_DATE, y = pred.y), size = 1)+ geom_line(aes(color = "Any Given Borough", x = OCCUR_DATE,  y = bonus)) + scale_y_log10()
+```
+For the boroughs of Brooklyn, the Bronx, and Staten Island, the p-value is less than .05. For these boroughs we can say that there is a statistically significant linear relationship between the passage of time (increasing occurance date) and the total number of daily shootings in those boroughs. We can also note that the model summary for the entire set shows us that there is a statistically significant linear relationship between the number of daily shootings in the city as the days go by.
+
+For the boroughs of Manhattan and Queen, the p-value returned by the model summary is greater than .05. This tells us that there is not enough evidence to reject the null hypothesis that passage of days is not a statistically significant predictor of the daily number of shooting incidents in each of these boroughs. 
+
+I then plotted the daily incident and linear models together, assigning colors to each borough. This initial plot, while messy, provides us some futher insight into the data. We can see that the data forms what looks like a series of straight lines with intermingled points. Thinking about the X and Y variables here, it is logical that the graph looks like this as there are a total of 5475 points along the x axis (every day from 2006 to 2021), and under 20 unique values along the Y axis. Because shooting events are discrete, we can see lines along each whole number value form, consisting of points mapped to each day that value was reached. 
+
+For additional insight to the change from starting point to ending point for each borough, I transformed the y axis to a log scale. Compared to the initial plot, the log scale provides us a visual comparision of the percentage change of each borough as the days pass. It is much clearer through this plot that the rate of decline for Brooklyn, The Bronx, and Staten island are comparable while Queens and Manhattan show greater stagnation.
+
+For clarity, I have provided plots of Just the linear models without the individual data points. 
+
+##Monthly Shootings as a Function of Time
+Now that we have a sense of the effect of time on daily incidents, I would like to repeat this process for monthly and yearly data. Below, using the same process as daily data, I create linear models for incident count as a function of the month.
+
+```{r}
+mod_total <- lm(INCIDENT_COUNT ~ month, data = by_boro_monthly)
+summary(mod_total)
+
+incidents_lm<-by_boro_monthly %>%
+  ungroup()%>%
+  mutate(pred = predict(mod_total))
+
+mod_bk <- lm(INCIDENT_COUNT ~ month, data = by_boro_monthly%>%filter(BORO == "BROOKLYN"))
+summary(mod_bk)
+
+incidents_lm_bk<-by_boro_monthly %>%
+  filter(BORO == "BROOKLYN") %>%
+  mutate(pred = predict(mod_bk))
+
+mod_queens <- lm(INCIDENT_COUNT ~ month, data = by_boro_monthly%>%filter(BORO == "QUEENS"))
+summary(mod_queens)
+
+incidents_lm_queens<-by_boro_monthly %>%
+  filter(BORO == "QUEENS") %>%
+  mutate(pred = predict(mod_queens))
+
+mod_bronx <- lm(INCIDENT_COUNT ~ month, data = by_boro_monthly%>%filter(BORO == "BRONX"))
+summary(mod_bronx)
+
+incidents_lm_bronx<-by_boro_monthly %>%
+  filter(BORO == "BRONX") %>%
+  mutate(pred = predict(mod_bronx))
+
+mod_mnht <- lm(INCIDENT_COUNT ~ month, data = by_boro_monthly%>%filter(BORO == "MANHATTAN"))
+summary(mod_mnht)
+
+incidents_lm_mnht<-by_boro_monthly %>%
+  filter(BORO == "MANHATTAN") %>%
+  mutate(pred = predict(mod_mnht))
+
+mod_si <- lm(INCIDENT_COUNT ~ month, data = by_boro_monthly%>%filter(BORO == "STATEN ISLAND"))
+summary(mod_si)
+
+mod_bonus <-lm(INCIDENT_COUNT ~ month, data = by_boro_monthly)
+summary(mod_bonus)
+
+incidents_lm_si<-by_boro_monthly %>%
+  filter(BORO == "STATEN ISLAND") %>%
+  mutate(pred = predict(mod_si))
+
+
+incidents_lm_total <- incidents_lm_bk %>%
+  rbind(incidents_lm_bronx)%>%
+  rbind(incidents_lm_queens)%>%
+  rbind(incidents_lm_mnht)%>%
+  rbind(incidents_lm_si)
+
+incidents_lm <- incidents_lm %>%
+  left_join(incidents_lm_total, by = c("BORO", "month"))%>%
+  mutate(bonus = predict(mod_bonus))
+```
+Again looking at the p-values for each model, we can see that Brooklyn, The Bronx, Queens, and the full model all have a value under .05. This tells us that the passage of months is a statistically significant predictor of the number of total monthly shooting incidents in these boroughs, and for any given borough in the city. The p-values for the monthly models for the boroughs of Staten Island and Manhattan tell us that the passage of months for these boroughs is not statistically significant predictor of the total number of monthly shooting incidents. 
+
+I now plot the Monthly data points along with their linear models as I did with the daily data to 180 months rather than 5745 days, we can now see greater variablility in the total incidents represented by each data point. It is also evident that the total number of monthly incidents in each bourough is tiered. 
+
+Like I did with daily data, I then shifted the y axis to a log scale, which tells us about how drastic the percentage shift in data is. We can see that from the first plot that Brooklyn has a much steeper downward slope than Staten Island, which at first thought leads us to believe that we are seeing the most drastic decline in that borough; however, the log scale shows the percentage shifts for each of these boroughs is rather similar. This is because the comparitive starting point for Staten Island is smaller, so the decline in incidents, though numerically smaller, is much more pronounced and comperable to Brooklyn on the log scale.
+```{r}
+
+ggplot(incidents_lm, aes(x = month, y = INCIDENT_COUNT.x)) + geom_point(aes(color = BORO))+scale_x_date(date_labels = "%Y", date_breaks = "2 years")+geom_line(aes(color = BORO, x = month, y = pred.y), size = 1) + geom_line(aes(color = "Any Given Borough", y = bonus), size = 1)
+
+ggplot(incidents_lm, aes(x = month, y = INCIDENT_COUNT.x)) + geom_point(aes(color = BORO))+scale_x_date(date_labels = "%Y", date_breaks = "2 years")+geom_line(aes(color = BORO, x = month, y = pred.y), size = 1)+ geom_line(aes(color = "Any Given Borough", x = month,  y = bonus)) + scale_y_log10()
+```
+I now plot the Monthly data points along with their linear models as I did with the daily data. We can see that this is a much more readable plot. We have reduced the x axis to 180 months rather than 5745 days, and we can now see greater variablility in the total incidents represented by each data point. It is also evident that the total number of monthly incidents in each bourough is tiered. 
+
+Like I did with daily data, I then shifted the y axis to a log scale, which tells us about how drastic the percentage shift in data is. We can see that from the first plot that Brooklyn has a much steeper downward slope than Staten Island, which at first thought leads us to believe that we are seeing the most drastic decline in that borough; however, the log scale shows the percentage shifts for each of these boroughs is rather similar. This is because the comparitive starting point for Staten Island is smaller, so the decline in incidents, though numerically smaller, is much more pronounced and comperable to
+
+## Yearly Shootings as a Function of Time
+Lastly, I repeat the same process, gut this time grouping data by total number of yearly events. 
+```{r}
+
+mod_total <- lm(INCIDENT_COUNT ~ year, data = by_boro_yearly)
+summary(mod_total)
+
+incidents_lm<-by_boro_yearly %>%
+  ungroup()%>%
+  mutate(pred = predict(mod_total))
+
+mod_bk <- lm(INCIDENT_COUNT ~ year, data = by_boro_yearly%>%filter(BORO == "BROOKLYN"))
+summary(mod_bk)
+
+incidents_lm_bk<-by_boro_yearly %>%
+  filter(BORO == "BROOKLYN") %>%
+  mutate(pred = predict(mod_bk))
+
+mod_queens <- lm(INCIDENT_COUNT ~ year, data = by_boro_yearly%>%filter(BORO == "QUEENS"))
+summary(mod_queens)
+
+incidents_lm_queens<-by_boro_yearly %>%
+  filter(BORO == "QUEENS") %>%
+  mutate(pred = predict(mod_queens))
+
+mod_bronx <- lm(INCIDENT_COUNT ~ year, data = by_boro_yearly%>%filter(BORO == "BRONX"))
+summary(mod_bronx)
+
+incidents_lm_bronx<-by_boro_yearly %>%
+  filter(BORO == "BRONX") %>%
+  mutate(pred = predict(mod_bronx))
+
+mod_mnht <- lm(INCIDENT_COUNT ~ year, data = by_boro_yearly%>%filter(BORO == "MANHATTAN"))
+summary(mod_mnht)
+
+incidents_lm_mnht<-by_boro_yearly %>%
+  filter(BORO == "MANHATTAN") %>%
+  mutate(pred = predict(mod_mnht))
+
+mod_si <- lm(INCIDENT_COUNT ~ year, data = by_boro_yearly%>%filter(BORO == "STATEN ISLAND"))
+summary(mod_si)
+
+incidents_lm_si<-by_boro_yearly %>%
+  filter(BORO == "STATEN ISLAND") %>%
+  mutate(pred = predict(mod_si))
+
+
+incidents_lm_total <- incidents_lm_bk %>%
+  rbind(incidents_lm_bronx)%>%
+  rbind(incidents_lm_queens)%>%
+  rbind(incidents_lm_mnht)%>%
+  rbind(incidents_lm_si)
+
+incidents_lm <- incidents_lm %>%
+  left_join(incidents_lm_total%>%select(lm_boro = "pred", BORO, year), by = c("BORO", "year"))
+```
+Looking at the p-values once more, we can infer that the progression of year is a good predictor of number of yearly shooting incidents in only Brooklyn. The models for every other borough and any given borough show us that the progression of years is not a statistically significant predictor of the number of yearly incidents.
+
+Plotting this results in the following
+```{r}
+ggplot(incidents_lm, aes(x = year, y = INCIDENT_COUNT)) + geom_point(aes(color = BORO))+scale_x_date(date_labels = "%Y", date_breaks = "2 years")+geom_line(aes(color = BORO, x = year, y = lm_boro), size = 1)+ geom_line(aes(color = "Full", y = pred), size = 1)
+
+ggplot(incidents_lm, aes(x = year, y = INCIDENT_COUNT)) + geom_point(aes(color = BORO))+scale_x_date(date_labels = "%Y", date_breaks = "2 years")+geom_line(aes(color = BORO, x = year, y = lm_boro), size = 1)+ geom_line(aes(color = "Full", y = pred), size = 1)+ scale_y_log10()
+```
+
+Although we see a pretty prominent downward trend in the graphs, we can see an uptick towards the last two years. Did the post covid rise in shooting rates make an impact for the time frame given? To answer this we create another model for any given borough that uses data only before 2020. We can use this model to create new predictions for 2020 and 2021 based on the model generated by incidents that occured prior to 2020. We can then join the results of this model to our table to plot everything together.
+```{r}
+mod_bonus <-lm(INCIDENT_COUNT ~ year, data = by_boro_yearly%>%filter(year<"2020-01-01"))
+summary(mod_bonus)
+
+
+incidents_lm_bonus <-by_boro_yearly %>%
+  ungroup()%>%
+  mutate(pred = predict(mod_bonus, newdata = by_boro_yearly))
+
+incidents_lm <- incidents_lm %>%
+  left_join(incidents_lm_bonus%>%select(bonus = "pred", BORO, year), by = c("BORO", "year"))
+```
+The p-value for this new model shows us a different result than the full model for any given borough; following the linear trend of data before 2020, we can say that the progression of year is a good predictor of the yearly number of shootings in any given borough.
+
+We can gain some additional insights from the plots.
+```{r}
+
+ggplot(incidents_lm, aes(x = year, y = INCIDENT_COUNT)) + geom_point(aes(color = BORO))+scale_x_date(date_labels = "%Y", date_breaks = "2 years")+geom_line(aes(color = BORO, x = year, y = lm_boro), size = 1) + geom_line(aes(color = "Prior to 2020", y = bonus), size = 1) + geom_line(aes(color = "Full", y = pred), size = 2)
+
+ggplot(incidents_lm, aes(x = year, y = INCIDENT_COUNT)) + geom_point(aes(color = BORO))+scale_x_date(date_labels = "%Y", date_breaks = "2 years")+geom_line(aes(color = BORO, x = year, y = lm_boro), size = 1)+ geom_line(aes(color = "Prior to 2020",  y = bonus), size = 2) + geom_line(aes(color = "Full", y = pred), size = 2)+ scale_y_log10()
+```
+These plots visualize the differernce the two years of post covid shooting data makes on the overall yearly set, particularly with the models of any given borough. If we compare the two in the first plot, it is clear that the data before 2020 provides predictions for the next two years that are significantly lower than the model that includes the actual 2020 and 2021 results. The second plot provides an interesting result where the data model of data prior to 2020 displays a clear curvature in comparison to the rest of the plots. This downard curvature signifies that given it's starting position, the percentage shift from year to year is much more dramatic over time.
+
+
+## Conclusion
+
+While New York City is constantly changing, it is important to determine if the saftey of it's citizens is increasing or decreasing over time. We can see that different measures of how we view time can have a strong determination on whether it can be said that time is a factor in the amount of shootings for that given time frame. Additionally, we can see that the last two years have had a strong impact on the yearly trends of shooting data. As we obtain more data in the coming years, the next question we can ask is whether or not the past two years in the post covid era are outliers, or indicative of a new trend in shootings throughout the bouroughs of New York City.
