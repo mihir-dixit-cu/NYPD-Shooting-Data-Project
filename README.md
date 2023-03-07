@@ -2,7 +2,6 @@
 title: "Shooting Incidents in the Boroughs of New York City"
 author: "Mihir Dixit"
 date: "2023-03-06"
-output: html_document
 ---
 
 ## Introduction
